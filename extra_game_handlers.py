@@ -1,9 +1,9 @@
 """Functions for the user to implement when the config file is not adequate to express bot requirements."""
 from lib import model
-from lib.types import OPTIONS_TYPE
+from lib.lichess_types import OPTIONS_TYPE
 
 
-def game_specific_options(game: model.Game) -> OPTIONS_TYPE:
+def game_specific_options(game: model.Game) -> OPTIONS_TYPE:  # noqa: ARG001
     """
     Return a dictionary of engine options based on game aspects.
 
@@ -12,7 +12,7 @@ def game_specific_options(game: model.Game) -> OPTIONS_TYPE:
     return {}
 
 
-def is_supported_extra(challenge: model.Challenge) -> bool:
+def is_supported_extra(challenge: model.Challenge) -> bool:  # noqa: ARG001
     """
     Determine whether to accept a challenge.
 

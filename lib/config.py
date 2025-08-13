@@ -4,9 +4,10 @@ import yaml
 import os
 import logging
 import math
+import requests
 from abc import ABCMeta
 from typing import Any, Union, ItemsView, Callable
-from lib.types import CONFIG_DICT_TYPE, FilterType
+from lib.lichess_types import CONFIG_DICT_TYPE, FilterType
 
 logger = logging.getLogger(__name__)
 
@@ -168,20 +169,24 @@ def insert_default_values(CONFIG: CONFIG_DICT_TYPE) -> None:
     set_config_default(CONFIG, "engine", "online_moves", "online_egtb", key="enabled", default=False)
     set_config_default(CONFIG, "engine", "online_moves", "online_egtb", key="source", default="lichess")
     set_config_default(CONFIG, "engine", "online_moves", "online_egtb", key="min_time", default=20)
+    set_config_default(CONFIG, "engine", "online_moves", "online_egtb", key="max_time", default=10800)
     set_config_default(CONFIG, "engine", "online_moves", "online_egtb", key="max_pieces", default=7)
     set_config_default(CONFIG, "engine", "online_moves", "online_egtb", key="move_quality", default="best")
     set_config_default(CONFIG, "engine", "online_moves", "chessdb_book", key="enabled", default=False)
     set_config_default(CONFIG, "engine", "online_moves", "chessdb_book", key="min_time", default=20)
+    set_config_default(CONFIG, "engine", "online_moves", "chessdb_book", key="max_time", default=10800)
     set_config_default(CONFIG, "engine", "online_moves", "chessdb_book", key="move_quality", default="good")
     set_config_default(CONFIG, "engine", "online_moves", "chessdb_book", key="min_depth", default=20)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_cloud_analysis", key="enabled", default=False)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_cloud_analysis", key="min_time", default=20)
+    set_config_default(CONFIG, "engine", "online_moves", "lichess_cloud_analysis", key="max_time", default=10800)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_cloud_analysis", key="move_quality", default="best")
     set_config_default(CONFIG, "engine", "online_moves", "lichess_cloud_analysis", key="min_depth", default=20)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_cloud_analysis", key="min_knodes", default=0)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_cloud_analysis", key="max_score_difference", default=50)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_opening_explorer", key="enabled", default=False)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_opening_explorer", key="min_time", default=20)
+    set_config_default(CONFIG, "engine", "online_moves", "lichess_opening_explorer", key="max_time", default=10800)
     set_config_default(CONFIG, "engine", "online_moves", "lichess_opening_explorer", key="source", default="masters")
     set_config_default(CONFIG, "engine", "online_moves", "lichess_opening_explorer", key="player_name", default="")
     set_config_default(CONFIG, "engine", "online_moves", "lichess_opening_explorer", key="sort", default="winrate")
@@ -197,6 +202,7 @@ def insert_default_values(CONFIG: CONFIG_DICT_TYPE) -> None:
     set_config_default(CONFIG, "engine", "polyglot", key="max_depth", default=8)
     set_config_default(CONFIG, "engine", "polyglot", key="selection", default="weighted_random")
     set_config_default(CONFIG, "engine", "polyglot", key="min_weight", default=1)
+    set_config_default(CONFIG, "engine", "polyglot", key="normalization", default="none")
     set_config_default(CONFIG, "challenge", key="concurrency", default=1)
     set_config_default(CONFIG, "challenge", key="sort_by", default="best")
     set_config_default(CONFIG, "challenge", key="preference", default="none")
@@ -209,13 +215,16 @@ def insert_default_values(CONFIG: CONFIG_DICT_TYPE) -> None:
     set_config_default(CONFIG, "challenge", key="max_days", default=math.inf)
     set_config_default(CONFIG, "challenge", key="min_days", default=1)
     set_config_default(CONFIG, "challenge", key="block_list", default=[], force_empty_values=True)
+    set_config_default(CONFIG, "challenge", key="online_block_list", default=[], force_empty_values=True)
     set_config_default(CONFIG, "challenge", key="allow_list", default=[], force_empty_values=True)
+    set_config_default(CONFIG, "challenge", key="max_simultaneous_games_per_user", default=5)
     set_config_default(CONFIG, "correspondence", key="checkin_period", default=600)
     set_config_default(CONFIG, "correspondence", key="move_time", default=60, force_empty_values=True)
     set_config_default(CONFIG, "correspondence", key="disconnect_time", default=300)
     set_config_default(CONFIG, "matchmaking", key="challenge_timeout", default=30, force_empty_values=True)
     CONFIG["matchmaking"]["challenge_timeout"] = max(CONFIG["matchmaking"]["challenge_timeout"], 1)
     set_config_default(CONFIG, "matchmaking", key="block_list", default=[], force_empty_values=True)
+    set_config_default(CONFIG, "matchmaking", key="online_block_list", default=[], force_empty_values=True)
     set_config_default(CONFIG, "matchmaking", key="include_challenge_block_list", default=False, force_empty_values=True)
     default_filter = (CONFIG.get("matchmaking") or {}).get("delay_after_decline") or FilterType.NONE.value
     set_config_default(CONFIG, "matchmaking", key="challenge_filter", default=default_filter, force_empty_values=True)
@@ -229,7 +238,6 @@ def insert_default_values(CONFIG: CONFIG_DICT_TYPE) -> None:
     set_config_default(CONFIG, "matchmaking", key="opponent_min_rating", default=600, force_empty_values=True)
     set_config_default(CONFIG, "matchmaking", key="opponent_max_rating", default=4000, force_empty_values=True)
     set_config_default(CONFIG, "matchmaking", key="rating_preference", default="none")
-    set_config_default(CONFIG, "matchmaking", key="opponent_allow_tos_violation", default=True)
     set_config_default(CONFIG, "matchmaking", key="challenge_variant", default="random")
     set_config_default(CONFIG, "matchmaking", key="challenge_mode", default="random")
     set_config_default(CONFIG, "matchmaking", key="overrides", default={}, force_empty_values=True)
@@ -243,9 +251,26 @@ def insert_default_values(CONFIG: CONFIG_DICT_TYPE) -> None:
         for ponder in ["ponder", "uci_ponder"]:
             set_config_default(CONFIG, section, key=ponder, default=False)
 
-    for type in ["hello", "goodbye"]:
+    for greeting in ["hello", "goodbye"]:
         for target in ["", "_spectators"]:
-            set_config_default(CONFIG, "greeting", key=type + target, default="", force_empty_values=True)
+            set_config_default(CONFIG, "greeting", key=greeting + target, default="", force_empty_values=True)
+
+
+def process_block_list(CONFIG: CONFIG_DICT_TYPE) -> None:
+    """
+    Retrieve online block lists and copy over challenge blocklist if necessary.
+
+    :param CONFIG: The bot's config.
+    """
+    def parse_block_list_from_url(url: str) -> list[str]:
+        block_list = requests.get(url).text.strip()
+        return [username.strip() for username in block_list.split("\n")]
+
+    for url in CONFIG["matchmaking"]["online_block_list"]:
+        CONFIG["matchmaking"]["block_list"].extend(parse_block_list_from_url(url))
+
+    for url in CONFIG["challenge"]["online_block_list"]:
+        CONFIG["challenge"]["block_list"].extend(parse_block_list_from_url(url))
 
     if CONFIG["matchmaking"]["include_challenge_block_list"]:
         CONFIG["matchmaking"]["block_list"].extend(CONFIG["challenge"]["block_list"])
@@ -258,7 +283,7 @@ def log_config(CONFIG: CONFIG_DICT_TYPE, alternate_log_function: Callable[[str],
     :param CONFIG: The bot's config.
     """
     logger_config = CONFIG.copy()
-    logger_config["token"] = "logger"
+    logger_config["token"] = "logger"  # noqa: S105 (Possible hardcoded password)
     destination = alternate_log_function or logger.debug
     destination(f"Config:\n{yaml.dump(logger_config, sort_keys=False)}")
     destination("====================")
@@ -320,10 +345,11 @@ def validate_config(CONFIG: CONFIG_DICT_TYPE) -> None:
 
     pgn_directory = CONFIG["pgn_directory"]
     in_docker = os.environ.get("LICHESS_BOT_DOCKER")
-    config_warn(not pgn_directory or not in_docker, "Games will be saved to '{}', please ensure this folder is in a mounted "
-                                                    "volume; Using the Docker's container internal file system will prevent "
-                                                    "you accessing the saved files and can lead to disk "
-                                                    "saturation.".format(pgn_directory))
+    config_warn(not pgn_directory or not in_docker,
+                f"Games will be saved to '{pgn_directory}', please ensure this folder is in a mounted "
+                "volume; Using the Docker's container internal file system will prevent "
+                "you accessing the saved files and can lead to disk "
+                "saturation.")
 
     valid_pgn_grouping_options = ["game", "opponent", "all"]
     config_pgn_choice = CONFIG["pgn_file_grouping"]
@@ -366,6 +392,11 @@ def validate_config(CONFIG: CONFIG_DICT_TYPE) -> None:
                       f"`{selection}` is not a valid `engine:{select}` value. "
                       f"Please choose from {valid_selections}.")
 
+    polyglot_section = CONFIG["engine"].get("polyglot") or {}
+    config_assert(polyglot_section.get("normalization") in ["none", "max", "sum"],
+                  f"`{polyglot_section.get('normalization')}` is not a valid choice for "
+                  f"`engine:polyglot:normalization`. Please choose from ['none', 'max', 'sum'].")
+
     lichess_tbs_config = CONFIG["engine"].get("lichess_bot_tbs") or {}
     quality_selections = ["best", "suggest"]
     for tb in ["syzygy", "gaviota"]:
@@ -406,6 +437,7 @@ def load_config(config_file: str) -> Configuration:
         CONFIG["token"] = os.environ["LICHESS_BOT_TOKEN"]
 
     insert_default_values(CONFIG)
+    process_block_list(CONFIG)
     log_config(CONFIG)
     validate_config(CONFIG)
 

@@ -20,7 +20,7 @@ from lib import config
 from lib.timer import Timer, to_seconds, seconds
 from typing import Optional
 from lib.engine_wrapper import test_suffix
-from lib.types import CONFIG_DICT_TYPE
+from lib.lichess_types import CONFIG_DICT_TYPE
 if "pytest" not in sys.modules:
     sys.exit(f"The script {os.path.basename(__file__)} should only be run by pytest.")
 from lib import lichess_bot
@@ -28,11 +28,11 @@ from lib import lichess_bot
 platform = sys.platform
 archive_ext = "zip" if platform == "win32" else "tar"
 file_extension = ".exe" if platform == "win32" else ""
-stockfish_path = f"./TEMP/sf{file_extension}"
 
 
 def download_sf() -> None:
     """Download Stockfish 16."""
+    stockfish_path = f"./TEMP/sf{file_extension}"
     if os.path.exists(stockfish_path):
         return
 
@@ -46,9 +46,12 @@ def download_sf() -> None:
     with open(archive_name, "wb") as file:
         file.write(response.content)
 
-    archive_open = zipfile.ZipFile if archive_ext == "zip" else tarfile.TarFile
-    with archive_open(archive_name, "r") as archive_ref:
-        archive_ref.extractall("./TEMP/")
+    if archive_ext == "zip":
+        with zipfile.ZipFile(archive_name, "r") as archive_ref:
+            archive_ref.extractall("./TEMP/")  # noqa: S202
+    else:
+        with tarfile.TarFile(archive_name, "r") as archive_ref:
+            archive_ref.extractall("./TEMP/", filter="data")
 
     exe_ext = ".exe" if platform == "win32" else ""
     shutil.copyfile(f"./TEMP/stockfish/{sf_base}{exe_ext}", stockfish_path)
@@ -69,7 +72,7 @@ def download_lc0() -> None:
     with open("./TEMP/lc0_zip.zip", "wb") as file:
         file.write(response.content)
     with zipfile.ZipFile("./TEMP/lc0_zip.zip", "r") as zip_ref:
-        zip_ref.extractall("./TEMP/")
+        zip_ref.extractall("./TEMP/")  # noqa: S202
 
 
 def download_arasan() -> None:
@@ -77,15 +80,18 @@ def download_arasan() -> None:
     if os.path.exists(f"./TEMP/arasan{file_extension}"):
         return
     if platform == "win32":
-        response = requests.get("https://arasanchess.org/arasan24.2.2.zip", allow_redirects=True)
+        response = requests.get("https://arasanchess.org/arasan24.1.zip", allow_redirects=True)
     else:
         response = requests.get("https://arasanchess.org/arasan-linux-binaries-24.2.2.tar.gz", allow_redirects=True)
     response.raise_for_status()
     with open(f"./TEMP/arasan.{archive_ext}", "wb") as file:
         file.write(response.content)
-    archive_open = zipfile.ZipFile if archive_ext == "zip" else tarfile.TarFile
-    with archive_open(f"./TEMP/arasan.{archive_ext}", "r") as archive_ref:
-        archive_ref.extractall("./TEMP/")
+    if archive_ext == "zip":
+        with zipfile.ZipFile(f"./TEMP/arasan.{archive_ext}", "r") as archive_ref:
+            archive_ref.extractall("./TEMP/")  # noqa: S202
+    else:
+        with tarfile.TarFile(f"./TEMP/arasan.{archive_ext}", "r") as archive_ref:
+            archive_ref.extractall("./TEMP/", filter="data")
     shutil.copyfile(f"./TEMP/arasanx-64{file_extension}", f"./TEMP/arasan{file_extension}")
     if platform != "win32":
         st = os.stat(f"./TEMP/arasan{file_extension}")
@@ -99,7 +105,18 @@ lichess_bot.logging_configurer(logging_level, testing_log_file_name, True)
 logger = logging.getLogger(__name__)
 
 
-def lichess_org_simulator(opponent_path: str,
+class TrivialEngine:
+    """A trivial engine that should be trivial to beat."""
+
+    def play(self, board: chess.Board, *_: object) -> chess.engine.PlayResult:
+        """Choose the first legal move."""
+        return chess.engine.PlayResult(next(iter(board.legal_moves)), None)
+
+    def quit(self) -> None:
+        """Do nothing."""
+
+
+def lichess_org_simulator(opponent_path: Optional[str],
                           move_queue: Queue[Optional[chess.Move]],
                           board_queue: Queue[chess.Board],
                           clock_queue: Queue[tuple[datetime.timedelta, datetime.timedelta, datetime.timedelta]],
@@ -120,31 +137,19 @@ def lichess_org_simulator(opponent_path: str,
     wtime = start_time
     btime = start_time
 
-    if opponent_path == stockfish_path:
-        try:
-            download_sf()
-        except Exception:
-            logger.exception("Could not download the Stockfish chess engine")
-            pytest.skip("Could not download the Stockfish chess engine")
-
-    engine = chess.engine.SimpleEngine.popen_uci(opponent_path)
-    engine.configure({"Skill Level": 0, "Move Overhead": 1000, "Use NNUE": False}
-                     if opponent_path == stockfish_path else {})
+    engine = chess.engine.SimpleEngine.popen_uci(opponent_path) if opponent_path else TrivialEngine()
 
     while not board.is_game_over():
         if board.turn == chess.WHITE:
             if not board.move_stack:
-                move = engine.play(board,
-                                   chess.engine.Limit(time=1),
-                                   ponder=False)
+                move = engine.play(board, chess.engine.Limit(time=1))
             else:
                 move_timer = Timer()
                 move = engine.play(board,
                                    chess.engine.Limit(white_clock=to_seconds(wtime - seconds(2.0)),
                                                       white_inc=to_seconds(increment),
                                                       black_clock=to_seconds(btime),
-                                                      black_inc=to_seconds(increment)),
-                                   ponder=False)
+                                                      black_inc=to_seconds(increment)))
                 wtime -= move_timer.time_since_reset()
                 wtime += increment
             engine_move = move.move
@@ -172,7 +177,7 @@ def lichess_org_simulator(opponent_path: str,
     results.put(outcome is not None and outcome.winner == chess.BLACK)
 
 
-def run_bot(raw_config: CONFIG_DICT_TYPE, logging_level: int, opponent_path: str = stockfish_path) -> bool:
+def run_bot(raw_config: CONFIG_DICT_TYPE, logging_level: int, opponent_path: Optional[str] = None) -> bool:
     """
     Start lichess-bot test with a mocked version of the lichess.org site.
 
@@ -268,7 +273,7 @@ def test_lc0() -> None:
 @pytest.mark.timeout(150, method="thread")
 def test_arasan() -> None:
     """Test lichess-bot with Arasan (XBoard)."""
-    if platform != "linux" and platform != "win32":
+    if platform not in ("linux", "win32"):
         pytest.skip("Platform must be Windows or Linux.")
     with open("./config.yml.default") as file:
         CONFIG = yaml.safe_load(file)
@@ -323,9 +328,9 @@ def test_buggy_engine() -> None:
     CONFIG["engine"]["dir"] = "test_bot"
 
     def engine_path(CONFIG: CONFIG_DICT_TYPE) -> str:
-        dir: str = CONFIG["engine"]["dir"]
+        directory: str = CONFIG["engine"]["dir"]
         name: str = CONFIG["engine"]["name"].removesuffix(".py")
-        path = os.path.join(dir, name)
+        path = os.path.join(directory, name)
         if platform == "win32":
             path += ".bat"
         else:

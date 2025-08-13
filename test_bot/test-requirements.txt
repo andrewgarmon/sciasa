@@ -1,8 +1,6 @@
-pytest==8.3.4
-pytest-timeout==2.3.1
-flake8==7.1.1
-flake8-markdown==0.6.0
-flake8-docstrings==1.7.0
-mypy==1.13.0
-types-requests==2.32.0.20241016
-types-PyYAML==6.0.12.20240917
+pytest~=8.4
+pytest-timeout~=2.4
+ruff~=0.12
+mypy~=1.17
+types-requests~=2.32
+types-PyYAML~=6.0

@@ -2,17 +2,18 @@
 import json
 import requests
 from urllib.parse import urljoin
-from requests.exceptions import ConnectionError, HTTPError, ReadTimeout
+from requests.exceptions import ConnectionError as RequestsConnectionError, HTTPError, ReadTimeout
 from http.client import RemoteDisconnected
 import backoff
 import logging
 import traceback
 from collections import defaultdict
 import datetime
+import contextlib
 from lib.timer import Timer, seconds, sec_str
 from typing import Optional, Union, cast
 import chess.engine
-from lib.types import (UserProfileType, REQUESTS_PAYLOAD_TYPE, GameType, PublicDataType, OnlineType,
+from lib.lichess_types import (UserProfileType, REQUESTS_PAYLOAD_TYPE, GameType, PublicDataType, OnlineType,
                        ChallengeType, TOKEN_TESTS_TYPE, BackoffDetails)
 
 
@@ -44,10 +45,21 @@ logger = logging.getLogger(__name__)
 MAX_CHAT_MESSAGE_LEN = 140  # The maximum characters in a chat message.
 
 
-class RateLimited(RuntimeError):
-    """Exception raised when we are rate limited (status code 429)."""
+class Stop:
+    """Class to stop the bot."""
 
-    pass
+    def __init__(self) -> None:
+        """Initialize the Stop class."""
+        self.terminated = False
+        self.force_quit = False
+        self.restart = True
+
+
+stop = Stop()
+
+
+class RateLimitedError(RuntimeError):
+    """Exception raised when we are rate limited (status code 429)."""
 
 
 def is_new_rate_limit(response: requests.models.Response) -> bool:
@@ -57,7 +69,8 @@ def is_new_rate_limit(response: requests.models.Response) -> bool:
 
 def is_final(exception: Exception) -> bool:
     """If `is_final` returns True then we won't retry."""
-    return isinstance(exception, HTTPError) and exception.response is not None and exception.response.status_code < 500
+    return (isinstance(exception, HTTPError) and exception.response is not None and exception.response.status_code < 500
+            or stop.terminated or stop.force_quit)
 
 
 def backoff_handler(details: BackoffDetails) -> None:
@@ -109,7 +122,7 @@ class Lichess:
                                f"The current token has: {scopes}.")
 
     @backoff.on_exception(backoff.constant,
-                          (RemoteDisconnected, ConnectionError, HTTPError, ReadTimeout),
+                          (RemoteDisconnected, RequestsConnectionError, HTTPError, ReadTimeout),
                           max_time=60,
                           interval=0.1,
                           giveup=is_final,
@@ -185,7 +198,7 @@ class Lichess:
         return response.text
 
     @backoff.on_exception(backoff.constant,
-                          (RemoteDisconnected, ConnectionError, HTTPError, ReadTimeout),
+                          (RemoteDisconnected, RequestsConnectionError, HTTPError, ReadTimeout),
                           max_time=60,
                           interval=0.1,
                           giveup=is_final,
@@ -235,8 +248,8 @@ class Lichess:
         """
         path_template = ENDPOINTS[endpoint_name]
         if self.is_rate_limited(path_template):
-            raise RateLimited(f"{path_template} is rate-limited. "
-                              f"Will retry in {sec_str(self.rate_limit_time_left(path_template))} seconds.")
+            raise RateLimitedError(f"{path_template} is rate-limited. "
+                                   f"Will retry in {sec_str(self.rate_limit_time_left(path_template))} seconds.")
         return path_template
 
     def set_rate_limit_delay(self, path_template: str, delay_time: datetime.timedelta) -> None:
@@ -317,13 +330,11 @@ class Lichess:
 
     def decline_challenge(self, challenge_id: str, reason: str = "generic") -> None:
         """Decline a challenge."""
-        try:
+        with contextlib.suppress(Exception):
             self.api_post("decline", challenge_id,
                           data=f"reason={reason}",
                           headers={"Content-Type": "application/x-www-form-urlencoded"},
                           raise_for_status=False)
-        except Exception:
-            pass
 
     def get_profile(self) -> UserProfileType:
         """Get the bot's profile (e.g. username)."""
@@ -334,11 +345,9 @@ class Lichess:
     def get_ongoing_games(self) -> list[GameType]:
         """Get the bot's ongoing games."""
         ongoing_games: list[GameType] = []
-        try:
+        with contextlib.suppress(Exception):
             response = cast(dict[str, list[GameType]], self.api_get_json("playing"))
             ongoing_games = response["nowPlaying"]
-        except Exception:
-            pass
         return ongoing_games
 
     def resign(self, game_id: str) -> None:
@@ -379,7 +388,7 @@ class Lichess:
                         stream: bool = False) -> OnlineType:
         """Get an external move from online sources (chessdb or lichess.org)."""
         @backoff.on_exception(backoff.constant,
-                              (RemoteDisconnected, ConnectionError, HTTPError, ReadTimeout),
+                              (RemoteDisconnected, RequestsConnectionError, HTTPError, ReadTimeout),
                               max_time=60,
                               max_tries=self.max_retries,
                               interval=0.1,
