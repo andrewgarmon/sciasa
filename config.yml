@@ -3,7 +3,7 @@ url: "https://lichess.org/"        # Lichess base URL.
 
 engine:                            # Engine settings.
   dir: "./engines/"                # Directory containing the engine. This can be an absolute path or one relative to lichess-bot/.
-  name: "RandomMove"              # Binary name of the engine to use.
+  name: "Sciasa"              # Binary name of the engine to use.
 # interpreter: "java"
 # interpreter_options:
 #   - "-jar"
@@ -175,7 +175,7 @@ greeting:
   #   {opponent} to insert opponent's name
   #   {me} to insert bot's name
   # Any other words in curly braces will be removed.
-  hello: "Hi! I'm {me}. Good luck! Type !help for a list of commands I can respond to." # Message to send to opponent chat at the start of a game
+  hello: "Hi! I'm {me}. Good luck! I'm not very good yet. Type !help for a list of commands I can respond to." # Message to send to opponent chat at the start of a game
   goodbye: "Good game!" # Message to send to opponent chat at the end of a game
   hello_spectators: "Hi! I'm {me}. Type !help for a list of commands I can respond to." # Message to send to spectator chat at the start of a game
   goodbye_spectators: "Thanks for watching!" # Message to send to spectator chat at the end of a game
